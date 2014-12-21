@@ -1,10 +1,10 @@
 package kvserve;
 
+import java.io.IOException;
 import java.io.ObjectInputStream;
-import java.util.Comparable;
+import java.util.LinkedList;
 import java.util.Comparator;
 import java.util.Iterator;
-import java.util.LinkedList;
 import java.util.Map;
 
 /**
@@ -23,7 +23,7 @@ public class BatchedStreamIterator<T> implements Iterator<T> {
    */
   public BatchedStreamIterator(
       ObjectInputStream inputStream, int batchSize) {
-    this.buffer = (ArrayList<T>) new ArrayList();
+    this.buffer = (LinkedList<T>) new LinkedList();
     this.batchSize = batchSize;
     this.inputStream = inputStream;
     this.isAvailable = true;
@@ -36,7 +36,7 @@ public class BatchedStreamIterator<T> implements Iterator<T> {
   public T next() {
     fillBuffer();
     if (!buffer.isEmpty()) {
-      return buffer.remove()
+      return buffer.remove();
     }
     return null;
   }
@@ -65,16 +65,20 @@ public class BatchedStreamIterator<T> implements Iterator<T> {
    * Fills buffer if it is empty. If buffer can't be filled then mark
    * stream unavailable. Only function which read directly from inputStream.
    */
-  private void fillBuffer() throws IOException {
+  private void fillBuffer() {
     if (!buffer.isEmpty() || !isAvailable) {
       return;
     }
     for (int i = 0; i < batchSize && isAvailable; ++i) {
-      T obj = (T) inputStream.readObject();
-      if (obj != null) {
-        buffer.add(obj);
-      } else {
-        isAvailable = false;
+      try {
+        T obj = (T) inputStream.readObject();
+        if (obj != null) {
+          buffer.add(obj);
+        } else {
+          isAvailable = false;
+        }
+      } catch (IOException | ClassNotFoundException ex) {
+        throw new RuntimeException(ex);
       }
     }
   }

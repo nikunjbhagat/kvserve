@@ -1,13 +1,12 @@
 package kvserve;
 
-import com.google.common.collect.Multimaps;
-import com.google.common.collect.SortedSetMultiMap;
-import com.google.common.collect.TreeMultimap;
 import java.util.ArrayList;
+import java.util.concurrent.ConcurrentSkipListMap;
+import java.io.Serializable;
 
-public class DiskSSTableWriter<T> extends SSTableWriter<T> {
+public class DiskSSTableWriter<T extends Serializable> extends SSTableWriter<T> {
   
-  private SortedSetMultiMap<String, T> buffer;
+  private ConcurrentSkipListMap<String, T> buffer;
   private int bufferSize;
   private int currentChunk;
   private ArrayList<String> chunks;
@@ -18,15 +17,13 @@ public class DiskSSTableWriter<T> extends SSTableWriter<T> {
    * Create a SSTable file on disk. All data will be written in
    * single file.
    */
-  public DiskSSTableWriter<T>(
-      String name,
-      int maxBufferSize) {
+  public DiskSSTableWriter(String name, int maxBufferSize) {
     this.name = name;
     this.maxBufferSize = maxBufferSize;
     bufferSize = 0;
     currentChunk = 0;
     chunks = new ArrayList<String>();
-    buffer = Multimaps.synchronizedSortedSetMultimap(new TreeMultimap<String, T>());
+    buffer = new ConcurrentSkipListMap<String, T>();
   }
 
   /**
@@ -36,24 +33,27 @@ public class DiskSSTableWriter<T> extends SSTableWriter<T> {
   public void write(String key, T value) {
     buffer.put(key, value);
     bufferSize++;
+    if (needFlush()) {
+      flush();
+    }
   }
 
   public void flush() {
-    SortedSetMultiMap<String, T> flushedBuffer;
+    ConcurrentSkipListMap<String, T> flushedBuffer;
     int flushedChunk;
     synchronized(this) {
       flushedBuffer = buffer;
       flushedChunk = currentChunk;
-      buffer = Multimaps.synchronizedSortedSetMultimap(new TreeMultimap<String, T>());
+      buffer = new ConcurrentSkipListMap<String, T>();
       currentChunk++;
     }
     String flushedFilename = name + ".part" + String.format("%05d", flushedChunk);
-    DiskUtils.writeCollectionToFile(flushedFilename, flushedBuffer.entries().stream());
+    DiskUtils.writeCollectionToFile(flushedFilename, flushedBuffer.entrySet());
   }
 
   public void close() {
     flush();
-    DiskUtils.mergeChunks(chunks, name);
+    DiskUtils.mergeSortedFile(chunks, name, maxBufferSize);
   }
 
   /**
@@ -61,8 +61,6 @@ public class DiskSSTableWriter<T> extends SSTableWriter<T> {
    * buffer contents to disk.
    */
   private boolean needFlush() {
-    if (bufferSize > maxBufferSize) {
-      flush();
-    }
+    return bufferSize > maxBufferSize;
   }
 }
